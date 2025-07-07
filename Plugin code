@@ -1,0 +1,431 @@
+name: KillEffectPlugin
+version: 1.0
+main: com.yourname.killeffect.KillEffectPlugin
+api-version: 1.19
+commands:
+  godpot:
+    description: Give a god potion
+    usage: /godpot give <player> <effect>
+    permission: killeffect.godpot
+permissions:
+  killeffect.godpot:
+    description: Allows use of /godpot command
+    default: op
+
+package com.yourname.killeffect;
+
+import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
+import org.bukkit.Material;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
+import org.bukkit.command.TabCompleter;
+import org.bukkit.command.TabExecutor;
+import org.bukkit.enchantments.Enchantment;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.player.PlayerItemConsumeEvent;
+import org.bukkit.event.player.PlayerKillEntityEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.inventory.ItemFlag;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.PotionMeta;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
+import org.bukkit.potion.PotionType;
+import org.bukkit.potion.Potion;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
+import org.bukkit.potion.PotionType;
+import org.bukkit.potion.PotionMeta;
+import org.bukkit.plugin.java.JavaPlugin;
+
+import java.util.*;
+
+public class KillEffectPlugin extends JavaPlugin implements Listener, TabExecutor {
+
+    private final Map<UUID, Set<PotionEffectType>> permanentEffects = new HashMap<>();
+    private final List<PotionEffectType> goodEffects = Arrays.asList(
+            PotionEffectType.INCREASE_DAMAGE,
+            PotionEffectType.SPEED,
+            PotionEffectType.INVISIBILITY,
+            PotionEffectType.FAST_DIGGING,
+            PotionEffectType.REGENERATION,
+            PotionEffectType.SATURATION,
+            PotionEffectType.DOLPHINS_GRACE,
+            PotionEffectType.FIRE_RESISTANCE
+    );
+    private final List<PotionEffectType> badEffects = Arrays.asList(
+            PotionEffectType.POISON,
+            PotionEffectType.WITHER,
+            PotionEffectType.SLOW,
+            PotionEffectType.BLINDNESS
+    );
+
+    private final String EFFECT_KEY = "killeffect.effect";
+
+    private final Map<PotionEffectType, String> effectNames = new HashMap<>();
+
+    private final Random random = new Random();
+
+    private final Map<UUID, String> killRollMessages = new HashMap<>();
+
+    @Override
+    public void onEnable() {
+        getServer().getPluginManager().registerEvents(this, this);
+
+        effectNames.put(PotionEffectType.INCREASE_DAMAGE, "Strength");
+        effectNames.put(PotionEffectType.SPEED, "Speed");
+        effectNames.put(PotionEffectType.INVISIBILITY, "Invisibility");
+        effectNames.put(PotionEffectType.FAST_DIGGING, "Haste");
+        effectNames.put(PotionEffectType.REGENERATION, "Regeneration");
+        effectNames.put(PotionEffectType.SATURATION, "Saturation");
+        effectNames.put(PotionEffectType.DOLPHINS_GRACE, "Dolphin's Grace");
+        effectNames.put(PotionEffectType.FIRE_RESISTANCE, "Fire Resistance");
+
+        effectNames.put(PotionEffectType.POISON, "Poison");
+        effectNames.put(PotionEffectType.WITHER, "Wither");
+        effectNames.put(PotionEffectType.SLOW, "Slowness");
+        effectNames.put(PotionEffectType.BLINDNESS, "Blindness");
+    }
+
+    // ... The rest of the code will be in next parts
+}
+
+    // Utility: Add a permanent effect to a player
+    private void addEffect(Player player, PotionEffectType effect) {
+        UUID uuid = player.getUniqueId();
+        permanentEffects.computeIfAbsent(uuid, k -> new HashSet<>()).add(effect);
+        applyEffects(player);
+    }
+
+    // Utility: Remove a permanent effect from a player
+    private void removeEffect(Player player, PotionEffectType effect) {
+        UUID uuid = player.getUniqueId();
+        Set<PotionEffectType> effects = permanentEffects.get(uuid);
+        if (effects != null) {
+            effects.remove(effect);
+            if (effects.isEmpty()) {
+                permanentEffects.remove(uuid);
+            }
+        }
+        applyEffects(player);
+    }
+
+    // Apply all permanent effects to player
+    private void applyEffects(Player player) {
+        player.getActivePotionEffects().forEach(e -> player.removePotionEffect(e.getType()));
+
+        Set<PotionEffectType> effects = permanentEffects.get(player.getUniqueId());
+        if (effects != null) {
+            for (PotionEffectType effect : effects) {
+                player.addPotionEffect(new PotionEffect(effect, Integer.MAX_VALUE, 0, false, false));
+            }
+        }
+    }
+
+    // Remove a random effect or give bad effect if none
+    private void removeRandomEffectOrGiveBad(Player player) {
+        UUID uuid = player.getUniqueId();
+        Set<PotionEffectType> effects = permanentEffects.get(uuid);
+        if (effects == null || effects.isEmpty()) {
+            // Give bad effect for 30 seconds
+            PotionEffectType badEffect = badEffects.get(random.nextInt(badEffects.size()));
+            player.addPotionEffect(new PotionEffect(badEffect, 20 * 30, 0));
+            player.sendMessage(ChatColor.RED + "You had no good effects, so you got " + effectNames.get(badEffect) + " as penalty!");
+        } else {
+            List<PotionEffectType> effectList = new ArrayList<>(effects);
+            PotionEffectType removed = effectList.get(random.nextInt(effectList.size()));
+            removeEffect(player, removed);
+            player.sendMessage(ChatColor.YELLOW + "You lost your " + effectNames.get(removed) + " effect on death.");
+        }
+    }
+
+    // Handle player death event
+    @EventHandler
+    public void onPlayerDeath(PlayerDeathEvent event) {
+        Player player = event.getEntity();
+        removeRandomEffectOrGiveBad(player);
+    }
+
+    // Handle respawn: reapply effects
+    @EventHandler
+    public void onPlayerRespawn(PlayerRespawnEvent event) {
+        Player player = event.getPlayer();
+        Bukkit.getScheduler().runTaskLater(this, () -> applyEffects(player), 2L);
+    }
+
+    // Handle player killing another entity (only players)
+    @EventHandler
+    public void onPlayerKill(PlayerDeathEvent event) {
+        if (event.getEntity().getKiller() != null) {
+            Player killer = event.getEntity().getKiller();
+            // Give random good effect with roll animation
+            startRollAnimation(killer);
+        }
+    }
+
+    // Start the rolling "Roll... Roll... Roll..." chat animation then give effect
+    private void startRollAnimation(Player player) {
+        UUID uuid = player.getUniqueId();
+        List<String> rollStages = Arrays.asList("Roll.", "Roll..", "Roll...");
+        new BukkitRunnable() {
+            int count = 0;
+
+            @Override
+            public void run() {
+                if (count < rollStages.size()) {
+                    player.sendMessage(ChatColor.GREEN + rollStages.get(count));
+                    count++;
+                } else {
+                    cancel();
+                    PotionEffectType effect = goodEffects.get(random.nextInt(goodEffects.size()));
+                    addEffect(player, effect);
+                    player.sendMessage(ChatColor.GOLD + "+1 Good effect: " + ChatColor.AQUA + effectNames.get(effect) + "!");
+                }
+            }
+        }.runTaskTimer(this, 0L, 20L);
+    }
+
+    // Handle player drinking a potion
+    @EventHandler
+    public void onPlayerDrinkPotion(PlayerItemConsumeEvent event) {
+        Player player = event.getPlayer();
+        ItemStack item = event.getItem();
+        if (isGodPotion(item)) {
+            event.setCancelled(true);
+            openPotionEffectGUI(player);
+        }
+    }
+
+    // Check if item is a god potion (custom meta key)
+    private boolean isGodPotion(ItemStack item) {
+        if (item == null) return false;
+        if (item.getType() != Material.POTION) return false;
+        if (!item.hasItemMeta()) return false;
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) return false;
+        return meta.getPersistentDataContainer().has(new NamespacedKey(this, "godpot"), PersistentDataType.BYTE);
+    }
+
+import org.bukkit.NamespacedKey;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.scheduler.BukkitRunnable;
+
+// ... inside KillEffectPlugin class
+
+private final NamespacedKey GOD_POT_KEY = new NamespacedKey(this, "godpot");
+
+private final int GUI_SIZE = 9;
+
+// Opens the GUI to pick one of the good effects
+private void openPotionEffectGUI(Player player) {
+    Inventory gui = Bukkit.createInventory(null, GUI_SIZE, ChatColor.DARK_PURPLE + "Choose an Effect");
+
+    Set<PotionEffectType> playerEffects = permanentEffects.getOrDefault(player.getUniqueId(), new HashSet<>());
+
+    for (int i = 0; i < goodEffects.size() && i < GUI_SIZE; i++) {
+        PotionEffectType effect = goodEffects.get(i);
+        ItemStack item = new ItemStack(Material.POTION);
+        PotionMeta meta = (PotionMeta) item.getItemMeta();
+        meta.setBasePotionData(new PotionData(PotionType.WATER)); // just base water
+
+        String name = effectNames.getOrDefault(effect, effect.getName());
+        meta.setDisplayName(playerEffects.contains(effect) ?
+                ChatColor.GRAY + name : ChatColor.GREEN + name);
+
+        if (playerEffects.contains(effect)) {
+            meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
+            meta.addEnchant(Enchantment.LUCK, 1, true);
+            // Glow gray: enchant but gray name
+        }
+
+        item.setItemMeta(meta);
+        gui.setItem(i, item);
+    }
+
+    player.openInventory(gui);
+}
+
+// Handle GUI clicks
+@EventHandler
+public void onInventoryClick(InventoryClickEvent event) {
+    if (event.getView().getTitle().equals(ChatColor.DARK_PURPLE + "Choose an Effect")) {
+        event.setCancelled(true);
+        if (event.getCurrentItem() == null) return;
+        Player player = (Player) event.getWhoClicked();
+
+        ItemStack clicked = event.getCurrentItem();
+        if (clicked.getType() != Material.POTION) return;
+
+        PotionMeta meta = (PotionMeta) clicked.getItemMeta();
+        if (meta == null) return;
+
+        String name = ChatColor.stripColor(meta.getDisplayName());
+
+        // Find effect by name
+        PotionEffectType chosen = null;
+        for (Map.Entry<PotionEffectType, String> entry : effectNames.entrySet()) {
+            if (entry.getValue().equalsIgnoreCase(name)) {
+                chosen = entry.getKey();
+                break;
+            }
+        }
+        if (chosen == null) return;
+
+        Set<PotionEffectType> playerEffects = permanentEffects.getOrDefault(player.getUniqueId(), new HashSet<>());
+        if (playerEffects.contains(chosen)) {
+            player.sendMessage(ChatColor.RED + "You already have that effect!");
+            return;
+        }
+
+        addEffect(player, chosen);
+        player.sendMessage(ChatColor.GREEN + "You gained the " + effectNames.get(chosen) + " effect permanently!");
+        player.closeInventory();
+    }
+}
+
+// Command handler
+@Override
+public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+    if (command.getName().equalsIgnoreCase("godpot")) {
+        if (args.length != 3 || !args[0].equalsIgnoreCase("give")) {
+            sender.sendMessage(ChatColor.RED + "Usage: /godpot give <player> <effect>");
+            return true;
+        }
+        Player target = Bukkit.getPlayer(args[1]);
+        if (target == null) {
+            sender.sendMessage(ChatColor.RED + "Player not found");
+            return true;
+        }
+        PotionEffectType effect = null;
+        for (PotionEffectType e : goodEffects) {
+            if (effectNames.get(e).equalsIgnoreCase(args[2])) {
+                effect = e;
+                break;
+            }
+        }
+        if (effect == null) {
+            sender.sendMessage(ChatColor.RED + "Invalid effect. Valid: " + effectNames.values());
+            return true;
+        }
+        ItemStack potion = createGodPotion(effect);
+        target.getInventory().addItem(potion);
+        sender.sendMessage(ChatColor.GREEN + "Given god potion of " + effectNames.get(effect) + " to " + target.getName());
+        return true;
+    }
+    return false;
+}
+
+// Create a god potion item with effect data
+private ItemStack createGodPotion(PotionEffectType effect) {
+    ItemStack potion = new ItemStack(Material.POTION);
+    PotionMeta meta = (PotionMeta) potion.getItemMeta();
+    meta.setBasePotionData(new PotionData(PotionType.WATER));
+    meta.setDisplayName(ChatColor.GOLD + "God Potion of " + effectNames.get(effect));
+    meta.addEnchant(Enchantment.LUCK, 1, true);
+    meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
+
+    meta.getPersistentDataContainer().set(GOD_POT_KEY, PersistentDataType.BYTE, (byte)1);
+
+    potion.setItemMeta(meta);
+    return potion;
+}
+
+// Tab completer for /godpot give <player> <effect>
+@Override
+public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+    if (command.getName().equalsIgnoreCase("godpot")) {
+        if (args.length == 1) {
+            return Collections.singletonList("give");
+        } else if (args.length == 2) {
+            List<String> names = new ArrayList<>();
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                if (p.getName().toLowerCase().startsWith(args[1].toLowerCase()))
+                    names.add(p.getName());
+            }
+            return names;
+        } else if (args.length == 3) {
+            List<String> effects = new ArrayList<>();
+            for (PotionEffectType e : goodEffects) {
+                effects.add(effectNames.get(e));
+            }
+            List<String> filtered = new ArrayList<>();
+            for (String e : effects) {
+                if (e.toLowerCase().startsWith(args[2].toLowerCase()))
+                    filtered.add(e);
+            }
+            return filtered;
+        }
+    }
+    return Collections.emptyList();
+}
+
+import org.bukkit.NamespacedKey;
+import org.bukkit.inventory.RecipeChoice;
+import org.bukkit.inventory.ShapedRecipe;
+
+@Override
+public void onEnable() {
+    getServer().getPluginManager().registerEvents(this, this);
+
+    // existing initialization code...
+
+    addCraftingRecipe();
+}
+
+private void addCraftingRecipe() {
+    NamespacedKey key = new NamespacedKey(this, "god_potion_recipe");
+
+    ShapedRecipe recipe = new ShapedRecipe(key, createGodPotion(goodEffects.get(0))); // base god potion (strength by default)
+    recipe.shape(
+            "DDD",
+            "IEB",
+            " B "
+    );
+
+    // Legend:
+    // D = Diamond Block
+    // I = Iron Ingot
+    // E = Emerald Block
+    // B = Water Bottle (use as bottle)
+    // 'S' = Blue shard replaced with Prismarine Crystal
+
+    // Since you want 2 diamond blocks, 1 iron ingot, 1 emerald block, 1 blue shard, and 1 bottle:
+    // Let's fix the shape with these ingredients
+
+    recipe.shape(
+            " D ",
+            "IEB",
+            " D "
+    );
+
+    recipe.setIngredient('D', Material.DIAMOND_BLOCK);
+    recipe.setIngredient('I', Material.IRON_INGOT);
+    recipe.setIngredient('E', Material.EMERALD_BLOCK);
+    recipe.setIngredient('B', Material.POTION); // water bottle or regular potion
+    recipe.setIngredient('S', Material.PRISMARINE_CRYSTALS); // Blue shard replacement (not in shape here yet)
+
+    // Because shaped recipe requires a shape of 3x3 or 2x2
+    // Let's do a 3x3 shape with 2 diamond blocks, 1 iron, 1 emerald block, 1 prismarine crystal, 1 bottle
+
+    recipe.shape(
+            " D ",
+            "IES",
+            " B "
+    );
+
+    recipe.setIngredient('D', Material.DIAMOND_BLOCK);
+    recipe.setIngredient('I', Material.IRON_INGOT);
+    recipe.setIngredient('E', Material.EMERALD_BLOCK);
+    recipe.setIngredient('S', Material.PRISMARINE_CRYSTALS);
+    recipe.setIngredient('B', Material.POTION);
+
+    getServer().addRecipe(recipe);
+}
